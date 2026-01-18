@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>ESP32 + Sofia Airport Dashboard</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css"/>
+<link rel="stylesheet" href="https://unpkg.com/leaflet-routing-machine/dist/leaflet-routing-machine.css"/>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; width: 100%; font-family: 'Segoe UI', sans-serif; }
+  body { display: flex; }
+
+  /* LEFT PANEL - ESP32 Dashboard */
+  #left-panel {
+    width: 28%;
+    min-width: 260px;
+    background-color: #f4f6f8;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: flex-start;
+    padding: 2rem 1rem;
+    box-shadow: 4px 0 10px rgba(0,0,0,0.08);
+    gap: 12px;
+  }
+
+  h1 {
+    color: #0078d7;
+    margin-bottom: 0.5rem;
+    text-align: center;
+    font-size: 1.25rem;
+  }
+
+  .card {
+    background: white;
+    padding: 1.2rem;
+    border-radius: 12px;
+    box-shadow: 0 4px 10px rgba(0,0,0,0.06);
+    text-align: center;
+    width: 92%;
+    margin: 6px 0;
+    transition: all 0.2s ease;
+  }
+
+  .good { border-top: 5px solid #28a745; }
+  .medium { border-top: 5px solid #ffc107; }
+  .bad { border-top: 5px solid #dc3545; }
+
+  .value { font-size: 2.2rem; font-weight: 700; margin: 8px 0; }
+  .status { font-size: 1.05rem; font-weight: 600; color: #333; }
+
+  /* RIGHT PANEL - Map */
+  #right-panel { flex: 1; display: flex; flex-direction: column; background: #fff; }
+  #controls {
+    height: 10vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background-color: white;
+    gap: 20px;
+    border-bottom: 1px solid #e6e6e6;
+    padding: 0 12px;
+  }
+
+  select { padding: 6px 12px; font-size: 15px; border: 2px solid #111; border-radius: 12px; }
+  #map { height: calc(100vh - 10vh); width: 100%; }
+
+  a#feedback { text-decoration: none; color: #111; font-weight: 600; }
+  /* make polylines look clickable */
+  .leaflet-interactive { cursor: pointer; }
+</style>
+</head>
+<body>
+
+  <!-- LEFT SIDE: ESP32 Dashboard -->
+  <div id="left-panel">
+    <h1>ESP32 Road Quality</h1>
+    <div id="roadCard" class="card">
+      <div class="value" id="qualityValue">--</div>
+      <div class="status" id="roadCondition">Waiting for data...</div>
+    </div>
+    <div id="holesCard" class="card">
+      <div class="value" id="holesValue">--</div>
+      <div class="status" id="holesStatus">Waiting for holes data...</div>
+    </div>
+    <div class="card" id="sectorInfo" style="font-size:0.95rem;">
+      Hover a sector to see its % quality tooltip.<br>
+      Click a sector to lock its details into the dashboard.
+    </div>
+  </div>
+
+  <!-- RIGHT SIDE: Map and Controls -->
+  <div id="right-panel">
+    <div id="controls">
+      <label for="routeSelect">Select a route:</label>
+      <select id="routeSelect">
+        <option value="0">Route 1 (Red)</option>
+        <option value="1">Route 2 (Blue)</option>
+        <option value="2">Route 3 (Green)</option>
+      </select>
+      <a id="feedback" target="_blank" href="https://docs.google.com/forms/d/e/1FAIpQLSczsRGaiNdaBRxRVALlKULd1AukiYrFrxaQRIc5c0WU1uJlNQ/viewform?usp=header">Feedback</a>
+    </div>
+    <div id="map"></div>
+  </div>
+
+  <!-- Scripts -->
+  <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+  <script src="https://unpkg.com/leaflet-routing-machine/dist/leaflet-routing-machine.js"></script>
+
+  <script>
+  // --- DASHBOARD DOM refs ---
+  const qualityValue = document.getElementById('qualityValue');
+  const roadCondition = document.getElementById('roadCondition');
+  const holesValue = document.getElementById('holesValue');
+  const roadCard = document.getElementById('roadCard');
+
+  // If you have a websocket providing ESP32 data, keep this. If not, it's harmless.
+  try {
+    const ws = new WebSocket('ws://' + window.location.hostname + ':8080');
+    ws.onopen = () => console.log('[WebSocket] connected');
+    ws.onmessage = (evt) => {
+      try {
+        const msg = JSON.parse(evt.data);
+        if (msg.type === 'sensor_data' && msg.data) {
+          const q = (typeof msg.data.roadQuality === 'number') ? msg.data.roadQuality.toFixed(2) : '--';
+          const state = msg.data.condition || '--';
+          qualityValue.textContent = q;
+          roadCondition.textContent = state;
+          roadCard.classList.remove('good','medium','bad');
+          if (state === 'GOOD') roadCard.classList.add('good');
+          else if (state === 'MEDIUM') roadCard.classList.add('medium');
+          else if (state === 'BAD') roadCard.classList.add('bad');
+          holesValue.textContent = msg.data.holesCount ?? '--';
+        }
+      } catch(e){ console.warn('invalid ws message', e); }
+    };
+    ws.onclose = () => console.log('[WebSocket] closed');
+  } catch(e) {
+    console.warn('WebSocket init failed:', e);
+  }
+
+  // --- LEAFLET MAP LOGIC ---
+  const map = L.map('map').setView([42.6977, 23.3219], 12);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '© OpenStreetMap contributors' }).addTo(map);
+
+  // route data + quality percentages per 8 sectors (example data)
+  const routesData = [
+      { color: 'red',   name: 'Route 1', waypoints: [[42.6977,23.3219],[42.7000,23.3400],[42.6915,23.4060]],
+        sectorPercent: [100,80,90,70,80,90,80,80], avg: 83.75 },
+      { color: 'blue',  name: 'Route 2', waypoints: [[42.6977,23.3219],[42.7100,23.3600],[42.6915,23.4060]],
+        sectorPercent: [100,80,90,70,80,70,80,80], avg: 81.25 },
+      { color: 'green', name: 'Route 3', waypoints: [[42.6977,23.3219],[42.6800,23.3300],[42.6915,23.4060]],
+        sectorPercent: [80,70,60,50,70,60,80,80], avg: 68.75 }
+  ];
+
+  const routeControls = [];
+  const sectorPolylines = []; // array of arrays
+  const numSectors = 8;
+
+  function makeTooltipContent(routeData, sectorIndex) {
+    const p = routeData.sectorPercent[sectorIndex];
+    const avg = routeData.avg;
+    return `<strong>${routeData.name} — Sector ${sectorIndex+1}</strong><br>Quality: ${p}%<br>Route avg: ${avg}%`;
+  }
+
+  function getConditionFromPercent(p) {
+    if (p >= 90) return 'Best';
+    if (p >= 70) return 'Good';
+    if (p >= 50) return 'Average';
+    if (p >= 30) return 'Below average';
+    return 'Bad';
+  }
+
+  function createRouteWithSectors(routeData, routeIndex) {
+    const control = L.Routing.control({
+      waypoints: routeData.waypoints.map(p => L.latLng(p[0], p[1])),
+      createMarker: () => null,
+      addWaypoints: false,
+      draggableWaypoints: false,
+      routeWhileDragging: false,
+      fitSelectedRoutes: true
+    }).addTo(map);
+
+    control.on('routesfound', function(e) {
+      const route = e.routes[0];
+      const coords = route.coordinates;
+      const sectors = [];
+      const sectorLength = Math.floor(coords.length / numSectors) || 1;
+
+      for (let i = 0; i < numSectors; i++) {
+        const startIdx = i * sectorLength;
+        const endIdx = (i === numSectors - 1) ? coords.length : (i + 1) * sectorLength;
+        const sectorCoords = coords.slice(startIdx, endIdx);
+        // draw sector (if coords available)
+        if (sectorCoords.length > 0) {
+          const sector = L.polyline(sectorCoords, { color: routeData.color, weight: 4 }).addTo(map);
+
+          // bind tooltip (shows on hover)
+          sector.bindTooltip(makeTooltipContent(routeData, i), {
+            permanent: false,
+            direction: 'center',
+            className: 'sector-tooltip',
+            opacity: 0.95
+          });
+
+          // click behavior: style change + popup + update left dashboard
+          sector.on('click', () => {
+            // set style for clicked sector, reset siblings
+            sectors.forEach((s, idx) => s.setStyle({ color: routeData.color, weight: 4 }));
+            const p = routeData.sectorPercent[i];
+            const condition = getConditionFromPercent(p);
+            // highlight clicked one
+            sector.setStyle({ color: (p >= 90 ? 'purple' : (p >= 70 ? 'green' : (p >= 50 ? 'yellow' : (p >=30 ? 'orange' : 'red')))), weight: 6 });
+            // popup showing details
+            sector.bindPopup(`<strong>${routeData.name} - Sector ${i+1}</strong><br>Condition: ${condition} (${p}%)`).openPopup();
+
+            // update left dashboard with the sector info (so you "can see the quality")
+            qualityValue.textContent = p + '%';
+            roadCondition.textContent = `${condition}`;
+            roadCard.classList.remove('good','medium','bad');
+            if (p >= 70) roadCard.classList.add('good');
+            else if (p >= 50) roadCard.classList.add('medium');
+            else roadCard.classList.add('bad');
+
+            // optional: set holes to '--' or derive if you have data
+            holesValue.textContent = '--';
+          });
+
+          sectors.push(sector);
+        } else {
+          // placeholder if not enough coordinates
+          sectors.push(null);
+        }
+      }
+
+      // store sectors
+      sectorPolylines[routeIndex] = sectors;
+
+      // remove original full line (the internal routing polyline)
+      if (control._line) map.removeLayer(control._line);
+    });
+
+    return control;
+  }
+
+  // initialize routing controls & sectors
+  for (let i = 0; i < routesData.length; i++) {
+    routeControls[i] = createRouteWithSectors(routesData[i], i);
+    sectorPolylines[i] = [];
+  }
+
+  // dropdown logic: hide all sector layers then show selected
+  const select = document.getElementById('routeSelect');
+  function showRoute(index) {
+    // remove all existing sectors from map
+    for (let i = 0; i < sectorPolylines.length; i++) {
+      if (Array.isArray(sectorPolylines[i])) {
+        sectorPolylines[i].forEach(s => { if (s) map.removeLayer(s); });
+      }
+    }
+    // add selected
+    if (Array.isArray(sectorPolylines[index])) {
+      sectorPolylines[index].forEach(s => { if (s) s.addTo(map); });
+      // fit bounds to the route's visible sectors
+      const visible = sectorPolylines[index].filter(Boolean);
+      if (visible.length) {
+        const group = L.featureGroup(visible);
+        map.fitBounds(group.getBounds().pad(0.2));
+      }
+    }
+  }
+
+  select.addEventListener('change', function() {
+    const val = parseInt(this.value, 10);
+    showRoute(val);
+  });
+
+  // try to show first route when ready — routes might take a split-second to build
+  // poll until sectors are constructed (small loop with timeout)
+  (function waitThenShowDefault(retries = 30) {
+    const idx = 0;
+    if (sectorPolylines[idx] && sectorPolylines[idx].length > 0) {
+      // show default route
+      select.value = '0';
+      showRoute(0);
+    } else if (retries > 0) {
+      setTimeout(() => waitThenShowDefault(retries - 1), 200);
+    } else {
+      // fallback: call fit on waypoints
+      const wp = routesData[0].waypoints.map(p => L.latLng(p[0], p[1]));
+      map.fitBounds(L.featureGroup(wp.map(p => L.marker(p))).getBounds().pad(0.4));
+    }
+  })();
+
+  </script>
+</body>
+</html>
