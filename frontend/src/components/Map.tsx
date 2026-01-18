@@ -28,7 +28,7 @@ interface MapProps {
 }
 
 // Sub-component to handle routing for a single road and return coordinates
-function RoutingLine({ road, onRoadClick }: { road: Road, onRoadClick?: (road: Road) => void }) {
+function RoutingLine({ road, onRoadClick, isSelected }: { road: Road, onRoadClick?: (road: Road) => void, isSelected: boolean }) {
     const [positions, setPositions] = useState<[number, number][]>([]);
 
     useEffect(() => {
@@ -91,6 +91,7 @@ function RoutingLine({ road, onRoadClick }: { road: Road, onRoadClick?: (road: R
         <>
             {/* Invisibly thick line to make clicking much easier */}
             <Polyline
+                key={`${road.id}-click-${isSelected}`}
                 positions={displayPositions}
                 color="transparent"
                 weight={30}
@@ -102,10 +103,11 @@ function RoutingLine({ road, onRoadClick }: { road: Road, onRoadClick?: (road: R
             />
             {/* The visible road line */}
             <Polyline
+                key={`${road.id}-visible-${isSelected}`}
                 positions={displayPositions}
-                color={road.status === 'recording' ? '#22c55e' : '#3b82f6'}
-                weight={10}
-                opacity={0.8}
+                color={isSelected ? '#FF0000' : (road.status === 'recording' ? '#22c55e' : '#3b82f6')}
+                weight={isSelected ? 16 : 10}
+                opacity={isSelected ? 1.0 : 0.6}
                 interactive={false}
             >
                 <Popup>
@@ -123,6 +125,7 @@ function RoutingLine({ road, onRoadClick }: { road: Road, onRoadClick?: (road: R
             {/* Start Marker for the road */}
             <Marker
                 position={displayPositions[0]}
+                zIndexOffset={isSelected ? 1000 : 0}
                 eventHandlers={{
                     add: (e) => { e.target._icon.style.filter = 'hue-rotate(240deg) brightness(1.2) saturate(1.5)'; }
                 }}
@@ -138,6 +141,7 @@ function RoutingLine({ road, onRoadClick }: { road: Road, onRoadClick?: (road: R
             {/* End Marker for the road */}
             <Marker
                 position={displayPositions[displayPositions.length - 1]}
+                zIndexOffset={isSelected ? 1000 : 0}
                 eventHandlers={{
                     add: (e) => { e.target._icon.style.filter = 'hue-rotate(160deg) brightness(1.1) saturate(1.5)'; }
                 }}
@@ -162,7 +166,7 @@ function MapEvents({ onClick }: { onClick?: (lat: number, lng: number) => void }
     return null;
 }
 
-export default function Map({ className, roads = [], currentLocation, liveData, onMapClick, onRoadClick, waypoints }: MapProps) {
+export default function Map({ className, roads = [], currentLocation, liveData, onMapClick, onRoadClick, waypoints, selectedRoad }: MapProps) {
     const position: [number, number] = [41.9981, 21.4254];
 
     return (
@@ -189,8 +193,17 @@ export default function Map({ className, roads = [], currentLocation, liveData, 
                 </Marker>
             )}
 
-            {roads.map(road => (
-                <RoutingLine key={road.id} road={road} onRoadClick={onRoadClick} />
+            {[...roads].sort((a, b) => {
+                if (a.id === selectedRoad?.id) return 1;
+                if (b.id === selectedRoad?.id) return -1;
+                return 0;
+            }).map(road => (
+                <RoutingLine
+                    key={road.id}
+                    road={road}
+                    onRoadClick={onRoadClick}
+                    isSelected={selectedRoad?.id === road.id}
+                />
             ))}
 
             {waypoints && waypoints.map((p, i) => {

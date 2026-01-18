@@ -180,6 +180,7 @@ export default function PublicView() {
                     currentLocation={currentLocation}
                     liveData={liveData}
                     onRoadClick={handleRoadClick}
+                    selectedRoad={selectedRoadInfo}
                     className="h-full w-full"
                 />
             </div>

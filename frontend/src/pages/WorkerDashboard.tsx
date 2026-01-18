@@ -12,6 +12,7 @@ export default function WorkerDashboard() {
     const [ws, setWs] = useState<WebSocket | null>(null);
     const [liveData, setLiveData] = useState<SensorData | null>(null);
     const [activeRoadId, setActiveRoadId] = useState<string | null>(null);
+    const [selectedRoad, setSelectedRoad] = useState<Road | null>(null);
 
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
@@ -94,7 +95,14 @@ export default function WorkerDashboard() {
     const handleMapClick = (lat: number, lng: number) => {
         if (selectionMode === 'active') {
             setWaypoints([...waypoints, { lat, lng }]);
+        } else {
+            // Clear selection if clicking the map background in idle mode
+            setSelectedRoad(null);
         }
+    };
+
+    const handleRoadClick = (road: Road) => {
+        setSelectedRoad(road);
     };
 
     const startRecording = (roadId: string) => {
@@ -318,7 +326,9 @@ export default function WorkerDashboard() {
                             roads={roads}
                             liveData={liveData}
                             onMapClick={handleMapClick}
+                            onRoadClick={handleRoadClick}
                             waypoints={waypoints}
+                            selectedRoad={selectedRoad}
                             className="h-full w-full"
                         />
                     </div>
@@ -328,12 +338,15 @@ export default function WorkerDashboard() {
                         <div className="divide-y divide-slate-100">
                             {roads.map(road => (
                                 <div key={road.id} className="py-4 flex justify-between items-center hover:bg-slate-50 px-2 rounded-xl transition group">
-                                    <div className="flex items-center">
-                                        <div className="h-10 w-10 bg-slate-100 rounded-full flex items-center justify-center mr-4 group-hover:bg-blue-100 transition">
-                                            <MapPin className="h-5 w-5 text-slate-400 group-hover:text-blue-500" />
+                                    <div
+                                        className="flex items-center cursor-pointer flex-1"
+                                        onClick={() => handleRoadClick(road)}
+                                    >
+                                        <div className={`h-10 w-10 ${selectedRoad?.id === road.id ? 'bg-orange-100' : 'bg-slate-100'} rounded-full flex items-center justify-center mr-4 group-hover:bg-blue-100 transition`}>
+                                            <MapPin className={`h-5 w-5 ${selectedRoad?.id === road.id ? 'text-orange-500' : 'text-slate-400'} group-hover:text-blue-500`} />
                                         </div>
                                         <div>
-                                            <div className="font-bold text-slate-700">{road.name}</div>
+                                            <div className={`font-bold ${selectedRoad?.id === road.id ? 'text-orange-600' : 'text-slate-700'}`}>{road.name}</div>
                                             <div className="text-[10px] text-slate-400 font-mono">{road.id.substring(0, 8)}...</div>
                                         </div>
                                     </div>
