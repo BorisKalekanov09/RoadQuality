@@ -122,11 +122,19 @@ export default function PublicView() {
                                     <p className="text-slate-500 text-xs italic">{selectedRoadInfo.description || 'No description available'}</p>
                                 </div>
                                 <div className="space-y-3 pt-3 border-t border-blue-200/50">
-                                    <div className="flex justify-between">
-                                        <span className="text-slate-600 text-sm">Avg. Quality</span>
-                                        <span className="font-bold text-blue-700">{selectedRoadInfo.avgQuality.toFixed(1)}%</span>
+                                    <div className="space-y-1.5">
+                                        <div className="flex justify-between items-center text-sm">
+                                            <span className="text-slate-600">Avg. Quality</span>
+                                            <span className="font-black text-blue-700 text-base">{Math.round(selectedRoadInfo.avgQuality)}%</span>
+                                        </div>
+                                        <div className="w-full bg-blue-200/50 h-2 rounded-full overflow-hidden">
+                                            <div
+                                                className={`h-full transition-all duration-1000 ${selectedRoadInfo.avgQuality >= 80 ? 'bg-green-500' : selectedRoadInfo.avgQuality >= 50 ? 'bg-yellow-500' : 'bg-red-500'}`}
+                                                style={{ width: `${selectedRoadInfo.avgQuality}%` }}
+                                            />
+                                        </div>
                                     </div>
-                                    <div className="flex justify-between">
+                                    <div className="flex justify-between pt-1">
                                         <span className="text-slate-600 text-sm">Total Holes</span>
                                         <span className="font-bold text-slate-800">{selectedRoadInfo.totalHoles}</span>
                                     </div>

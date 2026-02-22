@@ -227,18 +227,29 @@ export default function WorkerDashboard() {
                                 )}
                             </div>
 
-                            <div className="grid grid-cols-3 gap-2 pt-4 border-t border-slate-800">
-                                <div className="text-center">
-                                    <div className="text-xl font-mono text-blue-400">{liveData?.roadQuality.toFixed(0) || '0'}%</div>
-                                    <div className="text-[10px] text-slate-500 uppercase">Quality</div>
+                            <div className="pt-4 border-t border-slate-800 space-y-4">
+                                <div className="space-y-1.5">
+                                    <div className="flex justify-between items-center">
+                                        <div className="text-[10px] text-slate-500 uppercase tracking-widest font-bold">Live Road Quality</div>
+                                        <div className="text-xl font-black text-blue-400 font-mono">{liveData?.roadQuality ? Math.round(liveData.roadQuality) : 0}%</div>
+                                    </div>
+                                    <div className="w-full bg-slate-800 h-1.5 rounded-full overflow-hidden">
+                                        <div
+                                            className={`h-full transition-all duration-300 ${(!liveData || liveData.roadQuality >= 80) ? 'bg-green-500' : liveData.roadQuality >= 50 ? 'bg-yellow-500' : 'bg-red-500'}`}
+                                            style={{ width: `${liveData?.roadQuality || 0}%` }}
+                                        />
+                                    </div>
                                 </div>
-                                <div className="text-center">
-                                    <div className="text-xl font-mono text-red-400">{liveData?.holesCount || '0'}</div>
-                                    <div className="text-[10px] text-slate-500 uppercase">Holes</div>
-                                </div>
-                                <div className="text-center">
-                                    <div className="text-sm font-bold text-slate-200 truncate mt-1">{liveData?.condition || '-'}</div>
-                                    <div className="text-[10px] text-slate-500 uppercase">State</div>
+
+                                <div className="grid grid-cols-2 gap-4 pb-2">
+                                    <div className="bg-slate-800/50 p-3 rounded-xl border border-slate-700/50">
+                                        <div className="text-[10px] text-slate-500 uppercase mb-1">Holes Detected</div>
+                                        <div className="text-xl font-bold text-red-400 font-mono">{liveData?.holesCount || '0'}</div>
+                                    </div>
+                                    <div className="bg-slate-800/50 p-3 rounded-xl border border-slate-700/50">
+                                        <div className="text-[10px] text-slate-500 uppercase mb-1">Condition</div>
+                                        <div className="text-sm font-bold text-slate-200 truncate">{liveData?.condition || 'READY'}</div>
+                                    </div>
                                 </div>
                             </div>
                         </div>

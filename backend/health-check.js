@@ -62,7 +62,7 @@ async function run() {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        roadQuality: 0.8,
+        roadQuality: 80,
         condition: 'GOOD',
         holesCount: 2,
         latitude: 42.7,
