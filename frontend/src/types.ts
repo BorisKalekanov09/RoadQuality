@@ -7,7 +7,7 @@ export interface Road {
     start_lng?: number;
     end_lat?: number;
     end_lng?: number;
-    waypoints?: { lat: number, lng: number }[];
+    waypoints?: { lat: number; lng: number }[];
     created_at: string;
 }
 
@@ -17,4 +17,12 @@ export interface SensorData {
     holesCount: number;
     latitude?: number;
     longitude?: number;
+}
+
+/** Road plus aggregated analytics from measurements (public view sidebar) */
+export interface RoadWithAnalytics extends Road {
+    avgQuality: number;
+    totalHoles: number;
+    dataPoints: number;
+    latestCondition: string;
 }

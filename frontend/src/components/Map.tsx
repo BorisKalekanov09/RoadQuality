@@ -1,5 +1,5 @@
 import { MapContainer, TileLayer, Marker, Popup, Polyline, useMapEvents } from 'react-leaflet';
-import type { Road } from '../types.ts';
+import type { Road, SensorData } from '../types';
 import { useEffect, useState } from 'react';
 import L from 'leaflet';
 
@@ -20,23 +20,61 @@ interface MapProps {
     className?: string;
     roads?: Road[];
     currentLocation?: { lat: number, lng: number };
-    liveData?: any;
+    liveData?: SensorData | null;
     onMapClick?: (lat: number, lng: number) => void;
     selectedRoad?: Road | null;
     onRoadClick?: (road: Road) => void;
     waypoints?: { lat: number, lng: number }[];
 }
 
-// Sub-component to handle routing for a single road and return coordinates
+// ─── Polite Routing Queue ──────────────────────────────────────────────────────────
+// To prevent IP bans from mapping servers (Too Many Requests), we strictly rate-limit
+// our API calls to exactly 1 request per 1000ms.
+const routingQueue: (() => Promise<void>)[] = [];
+let isQueueProcessing = false;
+
+function enqueueRoutePolite(task: () => Promise<void>) {
+    routingQueue.push(task);
+    if (!isQueueProcessing) {
+        processPoliteQueue();
+    }
+}
+
+async function processPoliteQueue() {
+    isQueueProcessing = true;
+    while (routingQueue.length > 0) {
+        const task = routingQueue.shift()!;
+        try {
+            await task();
+        } catch (e) {
+            console.error(e);
+        }
+        // Strict 1 second delay between requests to avoid bans
+        await new Promise(r => setTimeout(r, 1000));
+    }
+    isQueueProcessing = false;
+}
+
+// ─── Sub-component to handle routing for a single road ───────────────────────────
 function RoutingLine({ road, onRoadClick, isSelected }: { road: Road, onRoadClick?: (road: Road) => void, isSelected: boolean }) {
     const [positions, setPositions] = useState<[number, number][]>([]);
 
     useEffect(() => {
-        const processPoints = (pts: any[] | undefined) => (pts || []).map(p => ({
-            lat: Number(p.lat),
-            lng: Number(p.lng)
-        }));
+        const cacheKey = `osrm_cache_v3_${road.id}`;
 
+        // 1. Try to load from local cache to make it instant!
+        try {
+            const cached = localStorage.getItem(cacheKey);
+            if (cached) {
+                setPositions(JSON.parse(cached));
+                return;
+            }
+        } catch (e) { }
+
+        // Fallback straight-line points setup
+        const processPoints = (pts: any[] | undefined) => (pts || []).map(p => ({
+            lat: Number(p.lat), lng: Number(p.lng)
+        }));
         const hasWaypoints = road.waypoints && road.waypoints.length > 0;
         const points = hasWaypoints
             ? processPoints(road.waypoints)
@@ -46,38 +84,39 @@ function RoutingLine({ road, onRoadClick, isSelected }: { road: Road, onRoadClic
 
         if (points.length < 2) return;
 
-        const fetchRoute = async () => {
-            try {
-                // Call our backend proxy to avoid CORS and handle OSRM logic
-                const backendUrl = import.meta.env.VITE_BACKEND_URL || 'http://localhost:8080';
-                const response = await fetch(`${backendUrl}/route`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ points })
-                });
+        // 2. Fetch from routing API politely
+        const fetchOsrmRoute = async () => {
+            const pointsStr = points.map(p => `${p.lng},${p.lat}`).join(';');
+            const url = `https://routing.openstreetmap.de/routed-car/route/v1/driving/${pointsStr}?overview=full&geometries=geojson&steps=false&annotations=false`;
 
-                if (response.ok) {
-                    const data = await response.json();
-                    if (data.success && data.coordinates) {
-                        const coords = data.coordinates;
-                        // OSRM GeoJSON is [lng, lat], Leaflet needs [lat, lng]
-                        setPositions(coords.map((c: [number, number]) => [c[1], c[0]]));
-                    } else {
-                        throw new Error("Backend routing did not return coordinates");
+            try {
+                const res = await fetch(url);
+                if (res.ok) {
+                    const data = await res.json();
+                    if (data.routes && data.routes.length > 0) {
+                        const coords = data.routes[0].geometry.coordinates;
+                        const mappedCoords = coords.map((c: [number, number]) => [c[1], c[0]]);
+
+                        setPositions(mappedCoords);
+                        // Save so we never have to ask the server for this road again
+                        try { localStorage.setItem(cacheKey, JSON.stringify(mappedCoords)); } catch (_) { }
+                        return;
                     }
-                } else {
-                    throw new Error(`Proxy error: ${response.status}`);
                 }
-            } catch (error) {
-                console.error("Routing error for road:", road.name, error);
-                setPositions(points.map(p => [p.lat, p.lng]));
+            } catch (e) {
+                console.warn(`Routing failed for ${road.name}`);
             }
+
+            // Fallback to straight line if API fails
+            setPositions(points.map(p => [p.lat, p.lng]));
         };
 
-        fetchRoute();
+        // Enqueue the network request
+        enqueueRoutePolite(fetchOsrmRoute);
+
     }, [road]);
 
-    // Fallback/Loading positions if not yet calculated but we have start/end
+    // Fallback while loading
     const fallbackPositions: [number, number][] = (road.waypoints && road.waypoints.length > 0)
         ? road.waypoints.map(v => [Number(v.lat), Number(v.lng)])
         : (road.start_lat && road.start_lng && road.end_lat && road.end_lng)
@@ -90,19 +129,13 @@ function RoutingLine({ road, onRoadClick, isSelected }: { road: Road, onRoadClic
 
     return (
         <>
-            {/* Invisibly thick line to make clicking much easier */}
             <Polyline
                 key={`${road.id}-click-${isSelected}`}
                 positions={displayPositions}
                 color="transparent"
                 weight={30}
-                eventHandlers={{
-                    click: () => {
-                        if (onRoadClick) onRoadClick(road);
-                    }
-                }}
+                eventHandlers={{ click: () => { if (onRoadClick) onRoadClick(road); } }}
             />
-            {/* The visible road line */}
             <Polyline
                 key={`${road.id}-visible-${isSelected}`}
                 positions={displayPositions}
@@ -117,57 +150,32 @@ function RoutingLine({ road, onRoadClick, isSelected }: { road: Road, onRoadClic
                         <p className="text-gray-600 text-sm mb-2">{road.description || 'No description'}</p>
                         <div className="bg-gray-50 p-2 rounded border text-sm">
                             <p>Status: <span className={`capitalize font-semibold ${road.status === 'recording' ? 'text-green-600' : 'text-blue-600'}`}>{road.status}</span></p>
-                            <div className="mt-2 text-xs text-gray-400">Click to view detailed analytics</div>
                         </div>
                     </div>
                 </Popup>
             </Polyline>
 
-            {/* Start Marker for the road */}
             <Marker
                 position={displayPositions[0]}
                 zIndexOffset={isSelected ? 1000 : 0}
-                eventHandlers={{
-                    add: (e) => { e.target._icon.style.filter = 'hue-rotate(240deg) brightness(1.2) saturate(1.5)'; }
-                }}
-            >
-                <Popup>
-                    <div className="p-1">
-                        <div className="font-bold text-green-600 text-xs uppercase tracking-wider">Start of Road</div>
-                        <div className="font-bold">{road.name}</div>
-                    </div>
-                </Popup>
-            </Marker>
+                eventHandlers={{ add: (e) => { e.target._icon.style.filter = 'hue-rotate(240deg) brightness(1.2) saturate(1.5)'; } }}
+            />
 
-            {/* End Marker for the road */}
             <Marker
                 position={displayPositions[displayPositions.length - 1]}
                 zIndexOffset={isSelected ? 1000 : 0}
-                eventHandlers={{
-                    add: (e) => { e.target._icon.style.filter = 'hue-rotate(160deg) brightness(1.1) saturate(1.5)'; }
-                }}
-            >
-                <Popup>
-                    <div className="p-1">
-                        <div className="font-bold text-red-600 text-xs uppercase tracking-wider">End of Road</div>
-                        <div className="font-bold">{road.name}</div>
-                    </div>
-                </Popup>
-            </Marker>
+                eventHandlers={{ add: (e) => { e.target._icon.style.filter = 'hue-rotate(160deg) brightness(1.1) saturate(1.5)'; } }}
+            />
         </>
     );
 }
 
 function MapEvents({ onClick }: { onClick?: (lat: number, lng: number) => void }) {
-    useMapEvents({
-        click: (e) => {
-            if (onClick) onClick(e.latlng.lat, e.latlng.lng);
-        },
-    });
+    useMapEvents({ click: (e) => { if (onClick) onClick(e.latlng.lat, e.latlng.lng); } });
     return null;
 }
 
-export default function Map({ className, roads = [], currentLocation, liveData, onMapClick, onRoadClick, waypoints, selectedRoad }: MapProps) {
+export default function Map({ className, roads = [], currentLocation, liveData: _liveData, onMapClick, onRoadClick, waypoints: _waypoints, selectedRoad }: MapProps) {
     const position: [number, number] = [42.6977, 23.3219];
 
     return (
@@ -184,11 +192,6 @@ export default function Map({ className, roads = [], currentLocation, liveData, 
                     <Popup>
                         <div className="p-2">
                             <h3 className="font-bold border-b mb-2">Live Robot Location</h3>
-                            <div className="space-y-1">
-                                <p>Quality: <span className="font-mono">{liveData?.roadQuality?.toFixed(2) || '0.00'}</span></p>
-                                <p>Holes: <span className="font-mono">{liveData?.holesCount || '0'}</span></p>
-                                <p>Condition: <span className="font-bold">{liveData?.condition || 'UNKNOWN'}</span></p>
-                            </div>
                         </div>
                     </Popup>
                 </Marker>
@@ -206,40 +209,6 @@ export default function Map({ className, roads = [], currentLocation, liveData, 
                     isSelected={selectedRoad?.id === road.id}
                 />
             ))}
-
-            {waypoints && waypoints.map((p, i) => {
-                const isFirst = i === 0;
-                const isLast = i === waypoints.length - 1 && waypoints.length > 1;
-
-                // Use CSS filters to change marker color without extra assets
-                // Green for start, Red for end, Default (blue) for middle
-                const filter = isFirst
-                    ? 'hue-rotate(240deg) brightness(1.2) saturate(1.5)'
-                    : isLast
-                        ? 'hue-rotate(160deg) brightness(1.1) saturate(1.5)'
-                        : 'none';
-
-                return (
-                    <Marker
-                        key={`waypoint-${i}`}
-                        position={[p.lat, p.lng]}
-                        eventHandlers={{
-                            add: (e) => {
-                                e.target._icon.style.filter = filter;
-                            }
-                        }}
-                    >
-                        <Popup>
-                            <div className="font-bold">
-                                {isFirst ? '🚀 START POINT' : isLast ? '🏁 END POINT' : `Waypoint ${i + 1}`}
-                            </div>
-                            <div className="text-xs text-gray-500 font-mono">
-                                {p.lat.toFixed(5)}, {p.lng.toFixed(5)}
-                            </div>
-                        </Popup>
-                    </Marker>
-                );
-            })}
         </MapContainer>
     );
 }
