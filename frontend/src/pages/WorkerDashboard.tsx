@@ -16,8 +16,6 @@ export default function WorkerDashboard() {
 
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
-    const [fullName, setFullName] = useState('');
-    const [isSignUp, setIsSignUp] = useState(false);
     const [authLoading, setAuthLoading] = useState(false);
     const [session, setSession] = useState<Session | null>(null);
 
@@ -43,8 +41,9 @@ export default function WorkerDashboard() {
         if (!session) return; // Don't fetch if not logged in
 
         fetchRoads();
-
-        const socket = new WebSocket('ws://localhost:8080');
+        const backendUrl = import.meta.env.VITE_BACKEND_URL || 'http://localhost:8080';
+        const wsUrl = backendUrl.replace(/^http/, 'ws');
+        const socket = new WebSocket(wsUrl);
         socket.onopen = () => console.log('Worker WS Connected');
         socket.onmessage = (event) => {
             const msg = JSON.parse(event.data);
@@ -118,23 +117,8 @@ export default function WorkerDashboard() {
     const handleAuth = async (e: React.FormEvent) => {
         e.preventDefault();
         setAuthLoading(true);
-
-        if (isSignUp) {
-            const { error } = await supabase.auth.signUp({
-                email,
-                password,
-                options: {
-                    data: {
-                        full_name: fullName
-                    }
-                }
-            });
-            if (error) alert(error.message);
-            else alert('Signup successful! Check your email for confirmation (if enabled).');
-        } else {
-            const { error } = await supabase.auth.signInWithPassword({ email, password });
-            if (error) alert(error.message);
-        }
+        const { error } = await supabase.auth.signInWithPassword({ email, password });
+        if (error) alert(error.message);
         setAuthLoading(false);
     };
 
@@ -145,23 +129,9 @@ export default function WorkerDashboard() {
                     <div className="text-center mb-8">
                         <h1 className="text-3xl font-extrabold text-gray-900 mb-2">Worker Access</h1>
                         <p className="text-gray-500 text-sm">
-                            {isSignUp ? 'Create a new worker account' : 'Sign in to your worker dashboard'}
+                            Sign in to your worker dashboard
                         </p>
                     </div>
-
-                    {isSignUp && (
-                        <div className="mb-4">
-                            <label className="block text-gray-700 text-sm font-semibold mb-2">Full Name</label>
-                            <input
-                                type="text"
-                                value={fullName}
-                                onChange={(e) => setFullName(e.target.value)}
-                                className="w-full border border-gray-300 p-3 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition"
-                                placeholder="John Doe"
-                                required
-                            />
-                        </div>
-                    )}
 
                     <div className="mb-4">
                         <label className="block text-gray-700 text-sm font-semibold mb-2">Email</label>
@@ -189,17 +159,8 @@ export default function WorkerDashboard() {
                         type="submit"
                         disabled={authLoading}
                         className="w-full bg-blue-600 text-white p-4 rounded-lg hover:bg-blue-700 font-bold shadow-lg shadow-blue-200 transition active:scale-[0.98] disabled:opacity-50">
-                        {authLoading ? 'Processing...' : (isSignUp ? 'Create Account' : 'Sign In')}
+                        {authLoading ? 'Processing...' : 'Sign In'}
                     </button>
-
-                    <div className="mt-8 text-center pt-6 border-t border-gray-100">
-                        <button
-                            type="button"
-                            onClick={() => setIsSignUp(!isSignUp)}
-                            className="text-blue-600 hover:text-blue-800 font-medium text-sm">
-                            {isSignUp ? 'Already have an account? Sign In' : 'Need an account? Create one'}
-                        </button>
-                    </div>
                 </form>
             </div>
         );
