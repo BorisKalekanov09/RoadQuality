@@ -6,10 +6,10 @@
 #include <WiFi.h>
 #include <WebSocketsClient.h>
 
-const char* ssid = "TP-LINK_7516";     // Replace with your WiFi name
-const char* password = "e0887714303"; // Replace with your WiFi password
-const char* serverAddress = "192.168.0.100"; // Example: "192.168.1.100"
-const int serverPort = 8080;
+const char* ssid = "Boris’s iPhone";     // Replace with your WiFi name
+const char* password = "123123123"; // Replace with your WiFi password
+const char* serverAddress = "roadquality.onrender.com"; // Example: "192.168.1.100"
+const int serverPort = 443;
 WebSocketsClient webSocket;
 float roadQuality;
 String roadState;
@@ -201,7 +201,7 @@ void setup() {
   Serial.print("ESP32 IP: ");
   Serial.println(WiFi.localIP());
   Serial.println("Connecting to WebSocket server...");
-  webSocket.begin(serverAddress, serverPort, "/data");  // Connect to the WebSocket server
+  webSocket.beginSSL(serverAddress, serverPort, "/data");  // Connect to the WebSocket server
   webSocket.onEvent(webSocketEvent);  // Attach event handler
 
   xTaskCreatePinnedToCore(websocket_data,  "Task1", 4096, NULL, 1, NULL, 0);
