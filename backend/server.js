@@ -32,23 +32,28 @@ app.use(cors({
 }));
 app.use(express.static('public'));
 
-/** Normalize and validate sensor payload from body or WebSocket. Returns null if invalid. */
 function normalizeSensorPayload(raw) {
   if (!raw || typeof raw !== 'object') return null;
-  const quality = Number(raw.roadQuality);
-  const condition = String(raw.condition || 'UNKNOWN').toUpperCase();
-  const holesCount = Math.max(0, Math.floor(Number(raw.holesCount) || 0));
-  const lat = raw.latitude != null ? Number(raw.latitude) : null;
-  const lng = raw.longitude != null ? Number(raw.longitude) : null;
-  const clampedQuality = Number.isFinite(quality) ? Math.max(0, Math.min(100, quality)) : 0;
-  if (!VALID_CONDITIONS.has(condition)) return null;
-  return {
-    roadQuality: clampedQuality,
-    condition,
-    holesCount,
-    latitude: Number.isFinite(lat) ? lat : 0,
-    longitude: Number.isFinite(lng) ? lng : 0
-  };
+  const result = {};
+
+  if (raw.roadQuality !== undefined) {
+    const q = Number(raw.roadQuality);
+    result.roadQuality = Number.isFinite(q) ? Math.max(0, Math.min(100, q)) : 0;
+  }
+
+  if (raw.condition !== undefined) {
+    const c = String(raw.condition).toUpperCase();
+    if (VALID_CONDITIONS.has(c)) result.condition = c;
+  }
+
+  if (raw.holesCount !== undefined) {
+    result.holesCount = Math.max(0, Math.floor(Number(raw.holesCount) || 0));
+  }
+
+  if (raw.latitude != null) result.latitude = Number(raw.latitude);
+  if (raw.longitude != null) result.longitude = Number(raw.longitude);
+
+  return Object.keys(result).length > 0 ? result : null;
 }
 
 // ── Road Geometry Cache (Overpass proxy) ──────────────────────────────────────
