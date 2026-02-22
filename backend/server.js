@@ -14,7 +14,7 @@ const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-
 
 const app = express();
 const server = http.createServer(app);
-const wss = new WebSocket.Server({ server, host: '0.0.0.0' });
+const wss = new WebSocket.Server({ server });
 
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseKey = process.env.SUPABASE_KEY;
@@ -364,7 +364,7 @@ app.get('/health', (_req, res) => {
   res.status(200).json({ status: 'ok', service: 'road-quality-backend', timestamp: new Date().toISOString() });
 });
 
-server.listen(PORT, () => {
-  console.log(`Server running at http://localhost:${PORT}`);
+server.listen(PORT, '0.0.0.0', () => {
+  console.log(`Server running on port ${PORT}`);
   console.log('WebSocket on same port; GET /health for health check.');
 });
