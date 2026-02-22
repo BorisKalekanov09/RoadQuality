@@ -168,7 +168,7 @@ function MapEvents({ onClick }: { onClick?: (lat: number, lng: number) => void }
 }
 
 export default function Map({ className, roads = [], currentLocation, liveData, onMapClick, onRoadClick, waypoints, selectedRoad }: MapProps) {
-    const position: [number, number] = [41.9981, 21.4254];
+    const position: [number, number] = [42.6977, 23.3219];
 
     return (
         <MapContainer center={position} zoom={13} className={className} style={{ height: "100%", width: "100%" }}>
