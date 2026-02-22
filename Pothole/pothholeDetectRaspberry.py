@@ -6,7 +6,8 @@ import websocket
 from ultralytics import YOLO
 
 MODEL_PATH = "/home/boris/Documents/PothHole/Pothhole_Detect/best.pt"
-WS_URL = "ws://192.168.0.103:8080"
+# FIXED URL: No https:// inside wss://
+WS_URL = "wss://roadquality.onrender.com" 
 SEND_INTERVAL = 0.5
 
 # Load YOLO model
@@ -31,8 +32,7 @@ except Exception as e:
 last_send_time = 0
 
 while True:
-    frame = picam2.capture_array()  # frame is 4 channels
-    # Convert to 3 channels for YOLO
+    frame = picam2.capture_array()
     frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGRA2BGR)
 
     results = model(frame_rgb, imgsz=320, verbose=False)
@@ -44,11 +44,16 @@ while True:
                 cv2.FONT_HERSHEY_SIMPLEX, 1.1, (0, 255, 0), 3)
     cv2.imshow("YOLOv8 Detection", annotated)
 
-    # Send via WebSocket at SEND_INTERVAL
     current_time = time.time()
     if current_time - last_send_time > SEND_INTERVAL:
         try:
-            ws.send(json.dumps({"holesCount": num_holes}))
+            # Added "type": "sensor_data" to stay consistent
+            payload = {
+                "type": "sensor_data",
+                "holesCount": num_holes
+            }
+            ws.send(json.dumps(payload))
+            print(f"Sent: {num_holes} holes")
         except Exception as e:
             print(f"⚠️ Failed to send WebSocket message: {e}")
         last_send_time = current_time
