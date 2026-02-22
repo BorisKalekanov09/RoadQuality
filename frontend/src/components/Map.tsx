@@ -175,7 +175,7 @@ function MapEvents({ onClick }: { onClick?: (lat: number, lng: number) => void }
     return null;
 }
 
-export default function Map({ className, roads = [], currentLocation, liveData, onMapClick, onRoadClick, waypoints, selectedRoad }: MapProps) {
+export default function Map({ className, roads = [], currentLocation, liveData: _liveData, onMapClick, onRoadClick, waypoints: _waypoints, selectedRoad }: MapProps) {
     const position: [number, number] = [42.6977, 23.3219];
 
     return (
