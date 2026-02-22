@@ -1,73 +1,89 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import Map from '../components/Map';
-import type { Road, SensorData } from '../types.ts';
+import type { Road, RoadWithAnalytics } from '../types';
 import { supabase } from '../lib/supabase';
-import { Radio, BarChart3, X } from 'lucide-react';
+import { Radio, BarChart3, X, AlertCircle } from 'lucide-react';
 
 export default function PublicView() {
     const [roads, setRoads] = useState<Road[]>([]);
-    const [liveData, setLiveData] = useState<SensorData>({
-        roadQuality: 0,
-        condition: 'UNKNOWN',
-        holesCount: 0
-    });
-    const [isConnected, setIsConnected] = useState(false);
-    const [selectedRoadInfo, setSelectedRoadInfo] = useState<any>(null);
+    const [selectedRoadInfo, setSelectedRoadInfo] = useState<RoadWithAnalytics | null>(null);
+    const [roadsLoading, setRoadsLoading] = useState(true);
+    const [roadsError, setRoadsError] = useState<string | null>(null);
 
-    useEffect(() => {
-        // Fetch initial roads
-        supabase.from('roads').select('*').then(({ data }) => {
-            if (data) setRoads(data as Road[]);
-        });
-
-        // Connect to WebSocket
-        const backendUrl = import.meta.env.VITE_BACKEND_URL || 'http://localhost:8080';
-        const wsUrl = backendUrl.replace(/^http/, 'ws');
-        const ws = new WebSocket(wsUrl);
-
-        ws.onopen = () => {
-            console.log('Connected to WS');
-            setIsConnected(true);
-        };
-
-        ws.onmessage = (event) => {
-            try {
-                const message = JSON.parse(event.data);
-                if (message.type === 'sensor_data') {
-                    setLiveData(message.data);
-                } else if (message.type === 'status_update') {
-                    // Refresh roads to show new status
-                    supabase.from('roads').select('*').then(({ data }) => {
-                        if (data) setRoads(data as Road[]);
-                    });
-                }
-            } catch (e) {
-                console.error(e);
-            }
-        };
-
-        ws.onclose = () => setIsConnected(false);
-
-        return () => ws.close();
+    const fetchRoads = useCallback(async () => {
+        setRoadsError(null);
+        const { data, error } = await supabase.from('roads').select('*').order('created_at', { ascending: false });
+        if (error) {
+            setRoadsError(error.message);
+            setRoads([]);
+            return;
+        }
+        setRoads((data ?? []) as Road[]);
     }, []);
 
+    useEffect(() => {
+        setRoadsLoading(true);
+        fetchRoads().finally(() => setRoadsLoading(false));
+    }, [fetchRoads]);
+
+    useEffect(() => {
+        const backendUrl = import.meta.env.VITE_BACKEND_URL || 'http://localhost:8080';
+        const wsUrl = backendUrl.replace(/^http/, 'ws');
+        let ws: WebSocket;
+        let reconnectTimer: ReturnType<typeof setTimeout>;
+
+        const connect = () => {
+            ws = new WebSocket(wsUrl);
+            ws.onmessage = (event) => {
+                try {
+                    const message = JSON.parse(event.data as string);
+                    if (message?.type === 'status_update') fetchRoads();
+                } catch {
+                    // ignore non-JSON or invalid messages
+                }
+            };
+            ws.onclose = () => {
+                reconnectTimer = setTimeout(connect, 3000);
+            };
+            ws.onerror = () => {
+                ws.close();
+            };
+        };
+        connect();
+        return () => {
+            clearTimeout(reconnectTimer);
+            ws?.close();
+        };
+    }, [fetchRoads]);
+
     const handleRoadClick = async (road: Road) => {
-        const { data } = await supabase
+        const { data, error } = await supabase
             .from('measurements')
             .select('quality, holes_count, condition')
             .eq('road_id', road.id)
             .order('timestamp', { ascending: false })
             .limit(100);
 
-        if (data && data.length > 0) {
-            const avgQuality = data.reduce((acc, curr) => acc + curr.quality, 0) / data.length;
-            const totalHoles = data.reduce((acc, curr) => acc + curr.holes_count, 0);
+        if (error) {
+            setSelectedRoadInfo({
+                ...road,
+                avgQuality: 0,
+                totalHoles: 0,
+                dataPoints: 0,
+                latestCondition: 'ERROR'
+            });
+            return;
+        }
+        const list = data ?? [];
+        if (list.length > 0) {
+            const avgQuality = list.reduce((acc, curr) => acc + (curr.quality ?? 0), 0) / list.length;
+            const totalHoles = list.reduce((acc, curr) => acc + (curr.holes_count ?? 0), 0);
             setSelectedRoadInfo({
                 ...road,
                 avgQuality,
                 totalHoles,
-                dataPoints: data.length,
-                latestCondition: data[0].condition
+                dataPoints: list.length,
+                latestCondition: list[0].condition ?? 'UNKNOWN'
             });
         } else {
             setSelectedRoadInfo({
@@ -80,36 +96,12 @@ export default function PublicView() {
         }
     };
 
-    const currentLocation = liveData.latitude && liveData.longitude
-        ? { lat: liveData.latitude, lng: liveData.longitude }
-        : undefined;
 
     return (
         <div className="flex h-[calc(100vh-64px)] bg-slate-50">
             {/* Sidebar */}
             <div className="w-80 bg-white border-r border-slate-200 overflow-y-auto flex flex-col shadow-sm">
                 <div className="p-6 space-y-8">
-                    {/* Live Status */}
-                    <div>
-                        <h2 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-4 flex items-center">
-                            <div className={`h-2 w-2 rounded-full mr-2 ${isConnected ? 'bg-green-500 animate-pulse' : 'bg-red-500'}`} />
-                            Live System Status
-                        </h2>
-                        <div className="bg-slate-900 rounded-2xl p-5 text-white shadow-lg space-y-4">
-                            <div className="flex justify-between items-center">
-                                <span className="text-slate-400 text-sm">Quality Index</span>
-                                <span className="text-2xl font-mono text-blue-400 font-bold">{liveData.roadQuality.toFixed(2)}</span>
-                            </div>
-                            <div className="flex justify-between items-center">
-                                <span className="text-slate-400 text-sm">Holes Detected</span>
-                                <span className="text-2xl font-mono text-red-400 font-bold">{liveData.holesCount}</span>
-                            </div>
-                            <div className="pt-2 border-t border-slate-800 flex justify-between items-center">
-                                <span className="text-slate-400 text-xs uppercase">Condition</span>
-                                <span className="text-sm font-bold text-blue-300">{liveData.condition}</span>
-                            </div>
-                        </div>
-                    </div>
 
                     {/* Selected Road Details */}
                     {selectedRoadInfo ? (
@@ -151,14 +143,24 @@ export default function PublicView() {
                         </div>
                     )}
 
+                    {roadsError && (
+                        <div className="flex items-center gap-2 p-3 rounded-xl bg-red-50 border border-red-200 text-red-700 text-sm">
+                            <AlertCircle className="h-4 w-4 shrink-0" />
+                            <span>{roadsError}</span>
+                        </div>
+                    )}
+
                     {/* All Roads List */}
                     <div>
                         <h2 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-4 flex items-center">
                             <Radio className="mr-2 h-4 w-4" />
-                            Active Networks
+                            Пътища
                         </h2>
+                        {roadsLoading && (
+                            <p className="text-slate-400 text-sm py-2">Зареждане...</p>
+                        )}
                         <div className="space-y-2">
-                            {roads.map(road => (
+                            {!roadsLoading && roads.map(road => (
                                 <button
                                     key={road.id}
                                     onClick={() => handleRoadClick(road)}
@@ -179,8 +181,6 @@ export default function PublicView() {
             <div className="flex-1 relative">
                 <Map
                     roads={roads}
-                    currentLocation={currentLocation}
-                    liveData={liveData}
                     onRoadClick={handleRoadClick}
                     selectedRoad={selectedRoadInfo}
                     className="h-full w-full"

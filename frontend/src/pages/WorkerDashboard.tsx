@@ -38,31 +38,51 @@ export default function WorkerDashboard() {
     }, []);
 
     useEffect(() => {
-        if (!session) return; // Don't fetch if not logged in
+        if (!session) return;
 
         fetchRoads();
         const backendUrl = import.meta.env.VITE_BACKEND_URL || 'http://localhost:8080';
         const wsUrl = backendUrl.replace(/^http/, 'ws');
-        const socket = new WebSocket(wsUrl);
-        socket.onopen = () => console.log('Worker WS Connected');
-        socket.onmessage = (event) => {
-            const msg = JSON.parse(event.data);
-            if (msg.type === 'sensor_data') {
-                setLiveData(msg.data);
-            } else if (msg.type === 'status_update') {
-                setIsRecording(msg.recording);
-                setActiveRoadId(msg.currentRoadId);
-                fetchRoads();
-            }
-        };
-        setWs(socket);
+        let socket: WebSocket;
+        let reconnectTimer: ReturnType<typeof setTimeout>;
 
-        return () => socket.close();
+        const connect = () => {
+            socket = new WebSocket(wsUrl);
+            socket.onopen = () => setWs(socket);
+            socket.onmessage = (event) => {
+                try {
+                    const msg = JSON.parse(event.data as string);
+                    if (msg?.type === 'sensor_data' && msg.data) setLiveData(msg.data);
+                    else if (msg?.type === 'status_update') {
+                        setIsRecording(!!msg.recording);
+                        setActiveRoadId(msg.currentRoadId ?? null);
+                        fetchRoads();
+                    }
+                } catch {
+                    // ignore invalid JSON
+                }
+            };
+            socket.onclose = () => {
+                setWs(null);
+                reconnectTimer = setTimeout(connect, 3000);
+            };
+            socket.onerror = () => socket.close();
+        };
+        connect();
+        return () => {
+            clearTimeout(reconnectTimer);
+            socket?.close();
+        };
     }, [session]);
 
     const fetchRoads = async () => {
-        const { data } = await supabase.from('roads').select('*').order('created_at', { ascending: false });
-        if (data) setRoads(data as Road[]);
+        const { data, error } = await supabase.from('roads').select('*').order('created_at', { ascending: false });
+        if (error) {
+            console.error('Failed to fetch roads:', error.message);
+            setRoads([]);
+            return;
+        }
+        setRoads((data ?? []) as Road[]);
     };
 
     const handleCreateRoad = async () => {

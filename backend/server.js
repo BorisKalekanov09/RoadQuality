@@ -5,23 +5,159 @@ const WebSocket = require('ws');
 const cors = require('cors');
 const { createClient } = require('@supabase/supabase-js');
 
-const app = express();
+// ─── Constants (single source of truth, easy to tune) ─────────────────────
 const PORT = process.env.PORT || 8080;
+const CORS_ORIGIN = process.env.CORS_ORIGIN || '*';
+const MAX_MEASUREMENT_BUFFER_SIZE = 50000;
+const VALID_CONDITIONS = new Set(['GOOD', 'MEDIUM', 'BAD', 'POOR', 'UNKNOWN']);
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+const app = express();
 const server = http.createServer(app);
 const wss = new WebSocket.Server({ server, host: '0.0.0.0' });
 
-// Initialize Supabase
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseKey = process.env.SUPABASE_KEY;
+if (!supabaseUrl || !supabaseKey) {
+  console.error('Missing SUPABASE_URL or SUPABASE_KEY in environment.');
+  process.exit(1);
+}
 const supabase = createClient(supabaseUrl, supabaseKey);
 
-app.use(express.json());
+app.use(express.json({ limit: '100kb' }));
 app.use(cors({
-  origin: '*', // For production, you can replace this with your actual Netlify URL
+  origin: CORS_ORIGIN,
   methods: ['GET', 'POST'],
   credentials: true
 }));
 app.use(express.static('public'));
+
+/** Normalize and validate sensor payload from body or WebSocket. Returns null if invalid. */
+function normalizeSensorPayload(raw) {
+  if (!raw || typeof raw !== 'object') return null;
+  const quality = Number(raw.roadQuality);
+  const condition = String(raw.condition || 'UNKNOWN').toUpperCase();
+  const holesCount = Math.max(0, Math.floor(Number(raw.holesCount) || 0));
+  const lat = raw.latitude != null ? Number(raw.latitude) : null;
+  const lng = raw.longitude != null ? Number(raw.longitude) : null;
+  const clampedQuality = Number.isFinite(quality) ? Math.max(0, Math.min(1, quality)) : 0;
+  if (!VALID_CONDITIONS.has(condition)) return null;
+  return {
+    roadQuality: clampedQuality,
+    condition,
+    holesCount,
+    latitude: Number.isFinite(lat) ? lat : 0,
+    longitude: Number.isFinite(lng) ? lng : 0
+  };
+}
+
+// ── Road Geometry Cache (Overpass proxy) ──────────────────────────────────────
+// Caches OSM road geometry in memory. One batch Overpass call covers ALL roads.
+let geometryCache = null; // { timestamp, data: { roadName: [[lat,lng], ...] } }
+const GEOMETRY_CACHE_TTL = 24 * 60 * 60 * 1000; // 24 hours
+
+function chainWays(ways) {
+  if (!ways || ways.length === 0) return [];
+  const chain = [...ways[0]];
+  const used = new Set([0]);
+  for (let i = 1; i < ways.length; i++) {
+    let found = false;
+    for (let j = 0; j < ways.length; j++) {
+      if (used.has(j)) continue;
+      const w = ways[j];
+      if (w[0] === chain[chain.length - 1]) {
+        used.add(j); chain.push(...w.slice(1)); found = true; break;
+      }
+      if (w[w.length - 1] === chain[chain.length - 1]) {
+        used.add(j); chain.push(...[...w].reverse().slice(1)); found = true; break;
+      }
+    }
+    if (!found) break;
+  }
+  return chain;
+}
+
+async function fetchGeometriesFromOverpass(names) {
+  const bbox = '42.55,23.10,42.80,23.55';
+  const nameFilters = names.map(n => `way["name"="${n}"](${bbox});`).join('\n');
+  const query = `[out:json][timeout:30];\n(\n${nameFilters}\n);\n(._;>);\nout body;`;
+
+  const servers = [
+    'https://overpass-api.de/api/interpreter',
+    'https://overpass.kumi.systems/api/interpreter',
+  ];
+
+  for (const server of servers) {
+    try {
+      const res = await fetch(server, {
+        method: 'POST',
+        body: query,
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        signal: AbortSignal.timeout(35000),
+      });
+      if (!res.ok) { console.warn(`[Geometry] ${server} returned ${res.status}`); continue; }
+      const data = await res.json();
+      if (!data.elements) continue;
+
+      const nodeMap = {};
+      for (const el of data.elements) {
+        if (el.type === 'node') nodeMap[el.id] = [el.lat, el.lon];
+      }
+
+      const waysByName = {};
+      for (const el of data.elements) {
+        if (el.type === 'way' && el.tags?.name && el.nodes) {
+          if (!waysByName[el.tags.name]) waysByName[el.tags.name] = [];
+          waysByName[el.tags.name].push(el.nodes);
+        }
+      }
+
+      const result = {};
+      for (const [name, ways] of Object.entries(waysByName)) {
+        const chain = chainWays(ways);
+        const coords = chain.map(id => nodeMap[id]).filter(Boolean);
+        if (coords.length >= 2) result[name] = coords;
+      }
+
+      console.log(`[Geometry] Fetched ${Object.keys(result).length} road geometries from ${server}`);
+      return result;
+    } catch (e) {
+      console.warn(`[Geometry] Failed to reach ${server}: ${e.message}`);
+    }
+  }
+  return null;
+}
+
+// GET /road-geometry?names=road1,road2,...
+app.get('/road-geometry', async (req, res) => {
+  const now = Date.now();
+
+  // Serve from cache if fresh
+  if (geometryCache && (now - geometryCache.timestamp) < GEOMETRY_CACHE_TTL) {
+    return res.json({ success: true, data: geometryCache.data, cached: true });
+  }
+
+  // Parse requested names or fetch all known from Supabase
+  let names = req.query.names ? req.query.names.split(',').map(n => n.trim()) : null;
+
+  if (!names || names.length === 0) {
+    try {
+      const { data: roads } = await supabase.from('roads').select('name');
+      names = (roads || []).map(r => r.name);
+    } catch (e) {
+      return res.status(500).json({ success: false, error: 'Could not load road names' });
+    }
+  }
+
+  const data = await fetchGeometriesFromOverpass(names);
+  if (!data) {
+    return res.status(502).json({ success: false, error: 'Overpass unavailable' });
+  }
+
+  geometryCache = { timestamp: now, data };
+  res.json({ success: true, data, cached: false });
+});
+
 
 let latestSensorData = {
   roadQuality: 0,
@@ -49,16 +185,17 @@ wss.on('connection', (ws, req) => {
   ws.on('message', async (message) => {
     try {
       const data = JSON.parse(message);
-      console.log("[Parsed JSON]", data);
-
       if (data.type === 'control') {
-        // Handle start/stop recording from Worker
         if (data.command === 'start' && data.roadId) {
+          if (!UUID_REGEX.test(String(data.roadId))) {
+            console.warn('[WebSocket] Invalid roadId format, ignoring start.');
+            return;
+          }
           currentRoadId = data.roadId;
-          measurementBuffer = []; // Clear buffer for new session
-          // Update road status in DB
-          await supabase.from('roads').update({ status: 'recording' }).eq('id', currentRoadId);
-          console.log(`Started recording for road: ${currentRoadId}`);
+          measurementBuffer = [];
+          const { error } = await supabase.from('roads').update({ status: 'recording' }).eq('id', currentRoadId);
+          if (error) console.error('[WebSocket] Failed to set road status:', error.message);
+          else console.log(`[WebSocket] Started recording for road: ${currentRoadId}`);
         } else if (data.command === 'stop') {
           if (currentRoadId) {
             // Calculate average data from buffer before stopping
@@ -104,26 +241,24 @@ wss.on('connection', (ws, req) => {
         broadcast({ type: "status_update", recording: !!currentRoadId, currentRoadId });
 
       } else {
-        // Assume sensor data
-        if (data.roadQuality !== undefined) latestSensorData.roadQuality = data.roadQuality;
-        if (data.condition !== undefined) latestSensorData.condition = data.condition;
-        if (data.holesCount !== undefined) latestSensorData.holesCount = data.holesCount;
+        const payload = normalizeSensorPayload(data);
+        if (!payload) {
+          console.warn('[WebSocket] Invalid sensor payload, ignoring.');
+          return;
+        }
+        latestSensorData = { ...latestSensorData, ...payload };
+        broadcast({ type: 'sensor_data', data: latestSensorData });
 
-        if (data.latitude) latestSensorData.latitude = data.latitude;
-        if (data.longitude) latestSensorData.longitude = data.longitude;
-
-        broadcast({ type: "sensor_data", data: latestSensorData });
-
-        // Buffer data if recording
         if (currentRoadId) {
-          measurementBuffer.push({
-            quality: latestSensorData.roadQuality,
-            condition: latestSensorData.condition,
-            holes_count: latestSensorData.holesCount,
-            latitude: latestSensorData.latitude,
-            longitude: latestSensorData.longitude
-          });
-          console.log(`Buffered measurement. Buffer size: ${measurementBuffer.length}`);
+          if (measurementBuffer.length < MAX_MEASUREMENT_BUFFER_SIZE) {
+            measurementBuffer.push({
+              quality: latestSensorData.roadQuality,
+              condition: latestSensorData.condition,
+              holes_count: latestSensorData.holesCount,
+              latitude: latestSensorData.latitude,
+              longitude: latestSensorData.longitude
+            });
+          }
         }
       }
 
@@ -143,40 +278,38 @@ function broadcast(msg) {
   });
 }
 
-// HTTP Endpoint for ESP32 (if using HTTP instead of WS)
-app.post('/data', async (req, res) => {
-  console.log("[HTTP] Received POST data:", req.body);
+// HTTP endpoint for sensors (e.g. ESP32) when WebSocket is not used
+app.post('/data', (req, res) => {
+  const payload = normalizeSensorPayload(req.body);
+  if (!payload) {
+    return res.status(400).json({ error: 'Invalid payload: require roadQuality (0-1), condition (GOOD|MEDIUM|BAD|POOR|UNKNOWN), holesCount (number)' });
+  }
+  latestSensorData = { ...latestSensorData, ...payload };
+  broadcast({ type: 'sensor_data', data: latestSensorData });
 
-  if (req.body.roadQuality !== undefined) latestSensorData.roadQuality = req.body.roadQuality;
-  if (req.body.condition !== undefined) latestSensorData.condition = req.body.condition;
-  if (req.body.holesCount !== undefined) latestSensorData.holesCount = req.body.holesCount;
-  if (req.body.latitude) latestSensorData.latitude = req.body.latitude;
-  if (req.body.longitude) latestSensorData.longitude = req.body.longitude;
-
-  broadcast({ type: "sensor_data", data: latestSensorData });
-
-  if (currentRoadId) {
+  if (currentRoadId && measurementBuffer.length < MAX_MEASUREMENT_BUFFER_SIZE) {
     measurementBuffer.push({
       quality: latestSensorData.roadQuality,
       condition: latestSensorData.condition,
       holes_count: latestSensorData.holesCount,
-      latitude: latestSensorData.latitude || 0,
-      longitude: latestSensorData.longitude || 0
+      latitude: latestSensorData.latitude,
+      longitude: latestSensorData.longitude
     });
   }
-
-  res.json({ status: 'success', received: latestSensorData });
+  res.json({ status: 'ok', received: latestSensorData });
 });
 
-// Proxy endpoint for OSRM Routing to avoid CORS and handle fallbacks
+// Proxy endpoint for OSRM routing (avoids CORS, fallback servers)
 app.post('/route', async (req, res) => {
   const { points } = req.body;
-  if (!points || points.length < 2) {
-    return res.status(400).json({ error: 'At least 2 points required' });
+  if (!Array.isArray(points) || points.length < 2 || points.length > 50) {
+    return res.status(400).json({ error: 'points must be an array of 2–50 { lat, lng } objects' });
   }
-
-  // Format points for OSRM: lng,lat;lng,lat
-  const pointsStr = points.map(p => `${p.lng},${p.lat}`).join(';');
+  const valid = points.every(p => typeof p === 'object' && p != null && Number.isFinite(Number(p.lat)) && Number.isFinite(Number(p.lng)));
+  if (!valid) {
+    return res.status(400).json({ error: 'Each point must have numeric lat and lng' });
+  }
+  const pointsStr = points.map(p => `${Number(p.lng)},${Number(p.lat)}`).join(';');
   const mode = 'route';
 
   const servers = [
@@ -217,11 +350,16 @@ app.post('/route', async (req, res) => {
   res.status(502).json({ error: 'Routing services unavailable' });
 });
 
-app.get('/data', (req, res) => {
+app.get('/data', (_req, res) => {
   res.json(latestSensorData);
 });
 
+// Health check for monitoring and automated tests
+app.get('/health', (_req, res) => {
+  res.status(200).json({ status: 'ok', service: 'road-quality-backend', timestamp: new Date().toISOString() });
+});
+
 server.listen(PORT, () => {
-  console.log(` Server running at: http://localhost:${PORT}`);
-  console.log(" WebSocket listening on the same port");
+  console.log(`Server running at http://localhost:${PORT}`);
+  console.log('WebSocket on same port; GET /health for health check.');
 });
