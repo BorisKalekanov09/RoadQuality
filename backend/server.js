@@ -40,7 +40,7 @@ function normalizeSensorPayload(raw) {
   const holesCount = Math.max(0, Math.floor(Number(raw.holesCount) || 0));
   const lat = raw.latitude != null ? Number(raw.latitude) : null;
   const lng = raw.longitude != null ? Number(raw.longitude) : null;
-  const clampedQuality = Number.isFinite(quality) ? Math.max(0, Math.min(1, quality)) : 0;
+  const clampedQuality = Number.isFinite(quality) ? Math.max(0, Math.min(100, quality)) : 0;
   if (!VALID_CONDITIONS.has(condition)) return null;
   return {
     roadQuality: clampedQuality,
@@ -282,7 +282,7 @@ function broadcast(msg) {
 app.post('/data', (req, res) => {
   const payload = normalizeSensorPayload(req.body);
   if (!payload) {
-    return res.status(400).json({ error: 'Invalid payload: require roadQuality (0-1), condition (GOOD|MEDIUM|BAD|POOR|UNKNOWN), holesCount (number)' });
+    return res.status(400).json({ error: 'Invalid payload: require roadQuality (0-100), condition (GOOD|MEDIUM|BAD|POOR|UNKNOWN), holesCount (number)' });
   }
   latestSensorData = { ...latestSensorData, ...payload };
   broadcast({ type: 'sensor_data', data: latestSensorData });

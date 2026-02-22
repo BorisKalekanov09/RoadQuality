@@ -124,7 +124,7 @@ export default function PublicView() {
                                 <div className="space-y-3 pt-3 border-t border-blue-200/50">
                                     <div className="flex justify-between">
                                         <span className="text-slate-600 text-sm">Avg. Quality</span>
-                                        <span className="font-bold text-blue-700">{selectedRoadInfo.avgQuality.toFixed(2)}</span>
+                                        <span className="font-bold text-blue-700">{selectedRoadInfo.avgQuality.toFixed(1)}%</span>
                                     </div>
                                     <div className="flex justify-between">
                                         <span className="text-slate-600 text-sm">Total Holes</span>

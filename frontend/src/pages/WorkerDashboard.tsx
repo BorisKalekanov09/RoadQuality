@@ -229,7 +229,7 @@ export default function WorkerDashboard() {
 
                             <div className="grid grid-cols-3 gap-2 pt-4 border-t border-slate-800">
                                 <div className="text-center">
-                                    <div className="text-xl font-mono text-blue-400">{liveData?.roadQuality.toFixed(1) || '0.0'}</div>
+                                    <div className="text-xl font-mono text-blue-400">{liveData?.roadQuality.toFixed(0) || '0'}%</div>
                                     <div className="text-[10px] text-slate-500 uppercase">Quality</div>
                                 </div>
                                 <div className="text-center">

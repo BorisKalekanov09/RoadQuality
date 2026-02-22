@@ -15,7 +15,7 @@ create table if not exists roads (
 create table if not exists measurements (
   id uuid default gen_random_uuid() primary key,
   road_id uuid references roads(id) on delete cascade,
-  quality float check (quality >= 0 and quality <= 1),
+  quality float check (quality >= 0 and quality <= 100),
   condition text,
   holes_count int check (holes_count >= 0),
   latitude float,
@@ -39,10 +39,10 @@ values
 ;
 
 insert into measurements (road_id, quality, condition, holes_count, latitude, longitude)
-select id, 0.84, 'GOOD', 1, start_lat, start_lng from roads where name = 'Partizanska Boulevard' limit 1;
+select id, 84, 'GOOD', 1, start_lat, start_lng from roads where name = 'Partizanska Boulevard' limit 1;
 
 insert into measurements (road_id, quality, condition, holes_count, latitude, longitude)
-select id, 0.45, 'POOR', 8, start_lat, start_lng from roads where name = 'Ilinden Avenue' limit 1;
+select id, 45, 'POOR', 8, start_lat, start_lng from roads where name = 'Ilinden Avenue' limit 1;
 
 -- Enable RLS
 alter table workers enable row level security;
