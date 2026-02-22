@@ -49,7 +49,8 @@ function RoutingLine({ road, onRoadClick, isSelected }: { road: Road, onRoadClic
         const fetchRoute = async () => {
             try {
                 // Call our backend proxy to avoid CORS and handle OSRM logic
-                const response = await fetch('http://localhost:8080/route', {
+                const backendUrl = import.meta.env.VITE_BACKEND_URL || 'http://localhost:8080';
+                const response = await fetch(`${backendUrl}/route`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ points })
@@ -167,7 +168,7 @@ function MapEvents({ onClick }: { onClick?: (lat: number, lng: number) => void }
 }
 
 export default function Map({ className, roads = [], currentLocation, liveData, onMapClick, onRoadClick, waypoints, selectedRoad }: MapProps) {
-    const position: [number, number] = [41.9981, 21.4254];
+    const position: [number, number] = [42.6977, 23.3219];
 
     return (
         <MapContainer center={position} zoom={13} className={className} style={{ height: "100%", width: "100%" }}>

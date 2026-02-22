@@ -16,7 +16,11 @@ const supabaseKey = process.env.SUPABASE_KEY;
 const supabase = createClient(supabaseUrl, supabaseKey);
 
 app.use(express.json());
-app.use(cors());
+app.use(cors({
+  origin: '*', // For production, you can replace this with your actual Netlify URL
+  methods: ['GET', 'POST'],
+  credentials: true
+}));
 app.use(express.static('public'));
 
 let latestSensorData = {

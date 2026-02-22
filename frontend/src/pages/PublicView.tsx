@@ -21,7 +21,9 @@ export default function PublicView() {
         });
 
         // Connect to WebSocket
-        const ws = new WebSocket('ws://localhost:8080');
+        const backendUrl = import.meta.env.VITE_BACKEND_URL || 'http://localhost:8080';
+        const wsUrl = backendUrl.replace(/^http/, 'ws');
+        const ws = new WebSocket(wsUrl);
 
         ws.onopen = () => {
             console.log('Connected to WS');
