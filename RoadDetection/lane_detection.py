@@ -2,7 +2,15 @@ import cv2 # Import the OpenCV library to enable computer vision
 import numpy as np # Import the NumPy scientific computing library
 import edge_detection as edge # Handles the detection of lane lines
 import matplotlib.pyplot as plt # Used for plotting and error checking
- 
+# from picamera2 import Picamera2
+
+# # Initialize camera
+# picam2 = Picamera2()
+# config = picam2.create_preview_configuration(
+#     main={"size": (640, 480), "format": "BGR888"}
+# )
+# picam2.configure(config)
+# picam2.start()
 # Author: Addison Sears-Collins
 # https://automaticaddison.com
 # Description: Implementation of the Lane class 
@@ -618,62 +626,63 @@ class Lane:
     cv2.destroyAllWindows()
      
 def main():
-     
-  # Load a frame (or image)
-  original_frame = cv2.imread(filename)
- 
-  # Create a Lane object
-  lane_obj = Lane(orig_frame=original_frame)
- 
-  # Perform thresholding to isolate lane lines
-  lane_line_markings = lane_obj.get_line_markings()
- 
-  # Plot the region of interest on the image
-  lane_obj.plot_roi(plot=False)
- 
-  # Perform the perspective transform to generate a bird's eye view
-  # If Plot == True, show image with new region of interest
-  warped_frame = lane_obj.perspective_transform(plot=False)
- 
-  # Generate the image histogram to serve as a starting point
-  # for finding lane line pixels
-  histogram = lane_obj.calculate_histogram(plot=False)  
-     
-  # Find lane line pixels using the sliding window method 
-  left_fit, right_fit = lane_obj.get_lane_line_indices_sliding_windows(
-    plot=False)
- 
-  # Fill in the lane line
-  lane_obj.get_lane_line_previous_window(left_fit, right_fit, plot=False)
-     
-  # Overlay lines on the original frame
-  frame_with_lane_lines = lane_obj.overlay_lane_lines(plot=False)
- 
-  # Calculate lane line curvature (left and right lane lines)
-  lane_obj.calculate_curvature(print_to_terminal=False)
- 
-  # Calculate center offset                                                                 
-  lane_obj.calculate_car_position(print_to_terminal=False)
-     
-  # Display curvature and center offset on image
-  frame_with_lane_lines2 = lane_obj.display_curvature_offset(
-    frame=frame_with_lane_lines, plot=True)
-     
-  # Create the output file name by removing the '.jpg' part
-  size = len(filename)
-  new_filename = filename[:size - 4]
-  new_filename = new_filename + '_thresholded.jpg'     
-     
-  # Save the new image in the working directory
-  #cv2.imwrite(new_filename, lane_line_markings)
- 
-  # Display the image 
-  #cv2.imshow("Image", lane_line_markings) 
-     
-  # Display the window until any key is pressed
-  cv2.waitKey(0) 
-     
-  # Close all windows
-  cv2.destroyAllWindows() 
+    # 1. Initialize the video capture object. '0' is usually the default built-in webcam.
+    # If you have an external webcam, you might need to change this to 1 or 2.
+    cap = cv2.VideoCapture(0)
+
+    # Check if the camera opened successfully
+    if not cap.isOpened():
+        print("Error: Could not access the camera.")
+        return
+
+    print("Press 'q' to quit the video stream.")
+
+    # 2. Create a continuous loop to process the live feed frame-by-frame
+    while cap.isOpened():
+        # Read a frame from the camera
+        success, frame = cap.read()
+        
+        if not success:
+            print("Ignoring empty camera frame.")
+            continue
+            
+        # 3. CRITICAL: Resize the webcam frame to match the hardcoded ROI points 
+        # in the Lane class (which were designed for a 600x338 image).
+        frame = cv2.resize(frame, (600, 338))
+        
+        # Create a Lane object for the current frame
+        lane_obj = Lane(orig_frame=frame)
+        
+        # Run the detection pipeline
+        lane_obj.get_line_markings()
+        lane_obj.perspective_transform(plot=False)
+        lane_obj.calculate_histogram(plot=False)  
+        
+        # Find lane line pixels
+        left_fit, right_fit = lane_obj.get_lane_line_indices_sliding_windows(plot=False)
+        lane_obj.get_lane_line_previous_window(left_fit, right_fit, plot=False)
+        
+        # Overlay lines and calculate stats
+        frame_with_lane_lines = lane_obj.overlay_lane_lines(plot=False)
+        lane_obj.calculate_curvature(print_to_terminal=False)
+        lane_obj.calculate_car_position(print_to_terminal=False)
+        
+        # Display curvature and center offset on image
+        # We pass plot=False here so it returns the image array instead of opening a static window
+        final_frame = lane_obj.display_curvature_offset(frame=frame_with_lane_lines, plot=False)
+        
+        # 4. Show the live, annotated video stream
+        cv2.imshow("Real-Time Lane Detection", final_frame)
+        
+        # 5. Wait 1 millisecond for a user input. If the user presses 'q', break the loop.
+        if cv2.waitKey(1) & 0xFF == ord('q'):
+            break
+            
+    # 6. Clean up: release the camera and close all OpenCV windows
+    cap.release()
+    cv2.destroyAllWindows() 
+
+if __name__ == '__main__':
+    main() 
      
 main()
