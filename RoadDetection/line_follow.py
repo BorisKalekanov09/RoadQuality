@@ -1,19 +1,35 @@
 import cv2
 import numpy as np
+import time
 
 cap = cv2.VideoCapture(0)
 
 if not cap.isOpened():
-    print("Camera not found")
-    exit()
+    print("Camera not found, trying index 1...")
+    cap = cv2.VideoCapture(1)
+    if not cap.isOpened():
+        print("No camera found at index 0 or 1")
+        exit()
 
+cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+
+print("Warming up camera...")
+time.sleep(2)
+
+# Throwaway frames to let camera stabilize
+for i in range(5):
+    cap.read()
+
+print("Starting...")
 last_cx = 320
 
 while True:
     ret, frame = cap.read()
     if not ret:
-        print("Failed to grab frame")
-        break
+        print("Failed to grab frame, retrying...")
+        time.sleep(0.1)
+        continue
 
     frame = cv2.resize(frame, (640, 480))
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
