@@ -231,12 +231,14 @@ export default function WorkerDashboard() {
                                 <div className="space-y-1.5">
                                     <div className="flex justify-between items-center">
                                         <div className="text-[10px] text-slate-500 uppercase tracking-widest font-bold">Live Road Quality</div>
-                                        <div className="text-xl font-black text-blue-400 font-mono">{liveData?.roadQuality ? Math.round(liveData.roadQuality) : 0}%</div>
+                                        <div className="text-xl font-black text-blue-400 font-mono">
+                                            {liveData?.roadQuality != null ? Math.round(liveData.roadQuality <= 1 ? liveData.roadQuality * 100 : liveData.roadQuality) : 0}%
+                                        </div>
                                     </div>
                                     <div className="w-full bg-slate-800 h-1.5 rounded-full overflow-hidden">
                                         <div
-                                            className={`h-full transition-all duration-300 ${(!liveData || liveData.roadQuality >= 80) ? 'bg-green-500' : liveData.roadQuality >= 50 ? 'bg-yellow-500' : 'bg-red-500'}`}
-                                            style={{ width: `${liveData?.roadQuality || 0}%` }}
+                                            className={`h-full transition-all duration-300 ${(!liveData || (liveData.roadQuality <= 1 ? liveData.roadQuality * 100 : liveData.roadQuality) >= 80) ? 'bg-green-500' : (liveData.roadQuality <= 1 ? liveData.roadQuality * 100 : liveData.roadQuality) >= 50 ? 'bg-yellow-500' : 'bg-red-500'}`}
+                                            style={{ width: `${liveData?.roadQuality != null ? (liveData.roadQuality <= 1 ? liveData.roadQuality * 100 : liveData.roadQuality) : 0}%` }}
                                         />
                                     </div>
                                 </div>

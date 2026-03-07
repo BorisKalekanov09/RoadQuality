@@ -127,12 +127,12 @@ export default function PublicView() {
                                 <div className="space-y-1.5">
                                     <div className="flex justify-between items-center text-xs">
                                         <span className="text-slate-500 font-medium">Avg. Quality</span>
-                                        <span className="font-black text-blue-700">{Math.round(selectedRoadInfo.avgQuality)}%</span>
+                                        <span className="font-black text-blue-700">{Math.round(selectedRoadInfo.avgQuality <= 1 ? selectedRoadInfo.avgQuality * 100 : selectedRoadInfo.avgQuality)}%</span>
                                     </div>
                                     <div className="w-full bg-blue-200/30 h-1.5 rounded-full overflow-hidden">
                                         <div
-                                            className={`h-full transition-all duration-1000 ${selectedRoadInfo.avgQuality >= 80 ? 'bg-green-500' : selectedRoadInfo.avgQuality >= 50 ? 'bg-yellow-500' : 'bg-red-500'}`}
-                                            style={{ width: `${selectedRoadInfo.avgQuality}%` }}
+                                            className={`h-full transition-all duration-1000 ${(selectedRoadInfo.avgQuality <= 1 ? selectedRoadInfo.avgQuality * 100 : selectedRoadInfo.avgQuality) >= 80 ? 'bg-green-500' : (selectedRoadInfo.avgQuality <= 1 ? selectedRoadInfo.avgQuality * 100 : selectedRoadInfo.avgQuality) >= 50 ? 'bg-yellow-500' : 'bg-red-500'}`}
+                                            style={{ width: `${selectedRoadInfo.avgQuality <= 1 ? selectedRoadInfo.avgQuality * 100 : selectedRoadInfo.avgQuality}%` }}
                                         />
                                     </div>
                                 </div>

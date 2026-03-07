@@ -37,7 +37,11 @@ function normalizeSensorPayload(raw) {
   const result = {};
 
   if (raw.roadQuality !== undefined) {
-    const q = Number(raw.roadQuality);
+    let q = Number(raw.roadQuality);
+    // If the value is between 0 and 1, we assume it's a normalized value and scale to 0-100%
+    if (q >= 0 && q <= 1) {
+      q = q * 100;
+    }
     result.roadQuality = Number.isFinite(q) ? Math.max(0, Math.min(100, q)) : 0;
   }
 
